@@ -9,8 +9,7 @@ class ConvolutionalLayer:
 
     def __init__(self, input, input_shape, filter_shape, flatten=False, layer_name=None, conv_stride=(1, 1, 1, 1),
                  conv_padding='same', pool=False, pool2d=tf.nn.max_pool, pool_size=(2, 2), pool_type='same',
-                 activation=tf.nn.relu, drop_out=False, drop_out_prob=0.5, batch_norm=False, batch_norm_decay=0.999,
-                 weight_norm=False, weight_norm_data=None):
+                 activation=tf.nn.relu, drop_out=False, drop_out_prob=0.5, batch_norm=False, batch_norm_decay=0.999):
         """
 
         :param input_shape: [n,h,w,c]
@@ -33,79 +32,52 @@ class ConvolutionalLayer:
             self.activation = activation
             self.batch_norm = batch_norm
             self.batch_norm_decay = batch_norm_decay
-            self.weight_norm = weight_norm
-            self.weight_norm_data = weight_norm_data
             self.parameters = []
 
             if drop_out and batch_norm:
                 logging.warning('You are using both dropout and batch normalization')
 
-            if weight_norm:
-                self.wn_layer = WeightNormalizationLayer(weight_norm_data, filter_shape,
-                                                         activation, layer_name+'_wn',
-                                                         conv_stride, conv_padding, pool,
-                                                         pool2d, pool_size, pool_type)
-                self.g = None
-                self.v = None
-            self.wn_output = None
-            self.weights_init()
-
             if batch_norm:
                 self.bn_layer = BatchNormalizationLayer(self.get_output_shape(flatten=False),
                                                         self.batch_norm_decay, layer_name=layer_name)
+            self.weights_init()
             print('@ Convolutional Layer %d' % (len(ConvolutionalLayer.layers)+1))
             print('\tinput shape: {0}'.format(self.input_shape))
             print('\tfilter shape: {0}'.format(filter_shape))
             print('\tpooling: {0} size {1}'.format(pool, pool_size))
             print('\tactivation: {0}'.format(activation))
-            print('\tweight normalization: {0}'.format(weight_norm))
             print('\tbatch normalization: {0}'.format(batch_norm))
             print('\tdropout: {0}'.format(drop_out))
             ConvolutionalLayer.layers.append(self)
 
     def weights_init(self):
-        if self.weight_norm:
-            wn_output = self.wn_layer.output()
-            self.wn_output = tf.reshape(wn_output, [-1, int(self.get_output_shape()[1])]) \
-                if self.flatten else wn_output
-            with tf.name_scope('weights'):
-                with tf.name_scope('scalar'):
-                    self.g = tf.Variable(self.wn_layer.g)
-                with tf.name_scope('vector'):
-                    self.v = tf.Variable(self.wn_layer.v)
-            with tf.name_scope('biases'):
-                self.b = tf.Variable(self.wn_layer.b)
-        else:
-            fan_in = np.prod(self.filter_shape[:3])
-            fan_out = (self.filter_shape[0] * np.prod(self.filter_shape[:2]))
-            W_bound = np.sqrt(6. / (fan_in + fan_out))
-            W_vals = tf.random_uniform_initializer(-W_bound, W_bound)
-            self.parameters.append(tf.get_variable('weights', self.filter_shape, tf.float32, W_vals))
-            self.parameters.append(tf.get_variable('biases', self.filter_shape[3],
-                                                   initializer=tf.random_normal_initializer()))
+        fan_in = np.prod(self.filter_shape[:3])
+        fan_out = (self.filter_shape[0] * np.prod(self.filter_shape[:2]))
+        W_bound = np.sqrt(6. / (fan_in + fan_out))
+        W_vals = tf.random_uniform_initializer(-W_bound, W_bound)
+        self.parameters.append(tf.get_variable('weights', self.filter_shape, tf.float32, W_vals))
+        self.parameters.append(tf.get_variable('biases', self.filter_shape[3],
+                                               initializer=tf.random_normal_initializer()))
 
     def output(self, input=None):
         input = self.input if input is None else input
         W, b = self.parameters
         with tf.name_scope(self.layer_name):
-            if self.weight_norm:
-                self.W = tf.multiply(tf.multiply(self.g, self.v),
-                                     tf.reciprocal(tf.sqrt(tf.reduce_sum(tf.square(self.v), [0, 1, 2]))))
             with tf.name_scope('convolution'):
                 output_conv = tf.nn.conv2d(input, W, self.conv_stride, self.conv_padding.upper()) + b
 
             if self.batch_norm:
                 output_conv = self.bn_layer.output(output_conv)
-            out = self.activation(output_conv)
 
             if self.pool:
                 with tf.name_scope('pooling'):
-                    out = self.pool2d(out, (1, self.pool_size[0], self.pool_size[1], 1),
+                    output_conv = self.pool2d(output_conv, (1, self.pool_size[0], self.pool_size[1], 1),
                                       (1, self.pool_size[0], self.pool_size[1], 1), self.pool_type.upper())
 
             if self.drop_out:
                 with tf.name_scope('dropout'):
-                    out = tf.nn.dropout(out, self.drop_out_prob)
+                    output_conv = tf.nn.dropout(output_conv, self.drop_out_prob)
+            out = self.activation(output_conv)
 
             self.__summary('pre_activation', output_conv)
             self.__summary('activation', out)
@@ -233,7 +205,7 @@ class FullyConnectedLayer:
     layers = []
 
     def __init__(self, input, shape, layer_name=None, activation=tf.nn.relu, drop_out=False, drop_out_prob=0.5,
-                 batch_norm=False, batch_norm_decay=0.9, weight_norm=False, weight_norm_data=None):
+                 batch_norm=False, batch_norm_decay=0.9):
         """
 
         :param shape: [w*h*c,o]
@@ -247,19 +219,10 @@ class FullyConnectedLayer:
             self.drop_out_prob = drop_out_prob
             self.batch_norm = batch_norm
             self.batch_norm_decay = batch_norm_decay
-            self.weight_norm = weight_norm
-            self.weight_norm_data = weight_norm_data
-
             if drop_out and batch_norm:
                 logging.warning('You are using both dropout and batch normalization')
 
             self.parameters = []
-            if self.weight_norm:
-                self.wn_layer = WeightNormalizationLayer(weight_norm_data, shape,
-                                                         activation, layer_name+'_wn')
-                self.g = None
-                self.v = None
-            self.wn_output = None
             self.weights_init()
 
             if self.batch_norm:
@@ -268,37 +231,23 @@ class FullyConnectedLayer:
             print('@ Fully Connected Layer %d' % (len(FullyConnectedLayer.layers)+1))
             print('\tshape: {0}'.format(shape))
             print('\tactivation: {0}'.format(activation))
-            print('\tweight normalization: {0}'.format(weight_norm))
             print('\tbatch normalization: {0}'.format(batch_norm))
             print('\tdropout: {0}'.format(drop_out))
             FullyConnectedLayer.layers.append(self)
 
     def weights_init(self):
-        if self.weight_norm:
-            self.wn_output = self.wn_layer.output()
-            with tf.name_scope('weights'):
-                with tf.name_scope('scalar'):
-                    self.g = tf.Variable(self.wn_layer.g)
-                with tf.name_scope('vector'):
-                    self.v = tf.Variable(self.wn_layer.v)
-            with tf.name_scope('biases'):
-                self.b = tf.Variable(self.wn_layer.b)
-        else:
-            fan_in = self.shape[0]
-            fan_out = self.shape[1]
-            W_bound = np.sqrt(6. / (fan_in + fan_out))
-            W_vals = tf.random_uniform_initializer(-W_bound, W_bound)
-            self.parameters.append(tf.get_variable('weights', self.shape, initializer=W_vals))
-            self.parameters.append(tf.get_variable('biases', self.shape[1],
-                                                   initializer=tf.random_normal_initializer()))
+        fan_in = self.shape[0]
+        fan_out = self.shape[1]
+        W_bound = np.sqrt(6. / (fan_in + fan_out))
+        W_vals = tf.random_uniform_initializer(-W_bound, W_bound)
+        self.parameters.append(tf.get_variable('weights', self.shape, initializer=W_vals))
+        self.parameters.append(tf.get_variable('biases', self.shape[1],
+                                               initializer=tf.random_normal_initializer()))
 
     def output(self, input=None):
         input = self.input if input is None else input
         with tf.name_scope(self.layer_name):
-            W = tf.multiply(tf.multiply(self.g, self.v), tf.reciprocal(tf.sqrt(tf.reduce_sum(
-                tf.square(self.v), [0])))) if self.weight_norm else self.parameters[0]
-            b = self.parameters[1]
-
+            W, b = self.parameters
             pre_activation = tf.matmul(input, W) + b
             out = self.activation(pre_activation)
             self.__summary('pre_activaiton', pre_activation)
@@ -307,71 +256,11 @@ class FullyConnectedLayer:
             if self.drop_out:
                 with tf.name_scope('dropout'):
                     out = tf.nn.dropout(out, self.drop_out_prob)
-            return self.bn_layer.output(out) if self.batch_norm \
-                else out
+            return self.bn_layer.output(out) if self.batch_norm else out
 
     def get_output_shape(self):
         with tf.name_scope(self.layer_name):
             return self.shape[1]
-
-    def __summary(self, name, var):
-        with tf.name_scope('summaries'):
-            tf.summary.histogram(name, var)
-
-
-class SoftmaxLayer:
-    layers = []
-
-    def __init__(self, input, shape, layer_name=None, weight_norm=False, weight_norm_data=None):
-        with tf.name_scope(layer_name):
-            self.input = input
-            self.shape = shape
-            self.layer_name = layer_name
-            self.weight_norm = weight_norm
-            self.weight_norm_data = weight_norm_data
-            if weight_norm:
-                self.wn_layer = WeightNormalizationLayer(weight_norm_data, shape,
-                                                         tf.nn.softmax, layer_name+'_wn')
-                self.g = None
-                self.v = None
-                self.wn_output = None
-            self.parameters = []
-            self.weights_init()
-            print('@ Softmax Layer %d' % (len(SoftmaxLayer.layers)+1))
-            print('\tshape: {0}'.format(shape))
-            print('\tweight normalization: {0}'.format(weight_norm))
-            SoftmaxLayer.layers.append(self)
-
-    def weights_init(self):
-        if self.weight_norm:
-            self.wn_output = self.wn_layer.output()
-            with tf.name_scope('weights'):
-                with tf.name_scope('scalar'):
-                    self.g = tf.Variable(self.wn_layer.g)
-                with tf.name_scope('vector'):
-                    self.v = tf.Variable(self.wn_layer.v)
-            with tf.name_scope('biases'):
-                self.b = tf.Variable(self.wn_layer.b)
-        else:
-            fan_in = self.shape[0]
-            fan_out = self.shape[1]
-            W_bound = np.sqrt(6. / (fan_in + fan_out))
-            W_vals = tf.random_uniform_initializer(-W_bound, W_bound)
-            self.parameters.append(tf.get_variable('weights', self.shape, initializer=W_vals))
-            self.parameters.append(tf.get_variable('biases', self.shape[1],
-                                                   initializer=tf.random_normal_initializer()))
-
-    def output(self):
-        with tf.name_scope(self.layer_name):
-            W = tf.multiply(tf.multiply(self.g, self.v),
-                            tf.reciprocal(tf.sqrt(tf.reduce_sum(
-                                tf.square(self.v), [0])))) if self.weight_norm else self.parameters[0]
-            b = self.parameters[1]
-            pre_activation = tf.matmul(self.input, W) + b
-            out = tf.nn.softmax(pre_activation)
-            self.__summary('pre_activation', pre_activation)
-            self.__summary('activation', out)
-            return out
 
     def __summary(self, name, var):
         with tf.name_scope('summaries'):
@@ -411,61 +300,6 @@ class BatchNormalizationLayer:
             muy, sigma = tf.cond(BatchNormalizationLayer.train_flag, update_mean_var_avr,
                                  lambda : (self.ema.average(mean), self.ema.average(var)))
             return tf.nn.batch_normalization(input, muy, sigma, self.beta, self.gamma, 1e-5)
-
-
-class WeightNormalizationLayer:
-    layers = []
-
-    def __init__(self, input, shape, activation, layer_name=None, conv_stride=None, conv_padding=None, pool=None,
-                 pool2d=None, pool_size=None, pool_type=None):
-        with tf.name_scope(layer_name):
-            self.input = input
-            self.shape = shape
-            self.layer_name = layer_name
-            self.conv_stride = conv_stride
-            self.conv_padding = conv_padding
-            self.pool = pool
-            self.pool2d = pool2d
-            self.pool_size = pool_size
-            self.pool_type = pool_type
-            self.activation = activation
-            self.g = None
-            self.v = None
-            self.b = None
-            self.weights_init()
-            WeightNormalizationLayer.layers.append(self)
-
-    def weights_init(self):
-        if len(self.shape) == 4:
-            fan_in = np.prod(self.shape[:3])
-            fan_out = (self.shape[0] * np.prod(self.shape[:2]))
-        else:
-            fan_in = self.shape[0]
-            fan_out = self.shape[1]
-        v_bound = np.sqrt(6. / (fan_in + fan_out))
-        v_vals = tf.random_uniform(self.shape, minval=-v_bound, maxval=v_bound)
-        with tf.name_scope('weights_vector'):
-            self.v = v_vals
-
-    def output(self):
-        with tf.name_scope(self.layer_name):
-            t = tf.multiply(tf.nn.conv2d(self.input, self.v, self.conv_stride,
-                                        self.conv_padding.upper()),
-                           tf.reciprocal(tf.sqrt(tf.reduce_sum(
-                               tf.square(self.v), [0, 1, 2])))) if len(self.shape) == 4 \
-                else tf.multiply(tf.matmul(self.input, self.v),
-                                tf.reciprocal(tf.sqrt(tf.reduce_sum(
-                                    tf.square(self.v), [0]))))
-            [muy, sigma] = tf.nn.moments(t, [0, 1, 2]) if len(self.shape) == 4 \
-                else tf.nn.moments(t, [0])
-            with tf.name_scope('weights_scalar'):
-                self.g = tf.reciprocal(sigma)
-            with tf.name_scope('biases'):
-                self.b = -tf.multiply(muy, tf.reciprocal(sigma))
-            y = self.activation(tf.multiply(t - muy, tf.reciprocal(sigma)))
-            return self.pool2d(y, (1, self.pool_size[0], self.pool_size[1], 1),
-                            (1, self.pool_size[0], self.pool_size[1], 1),
-                            self.pool_type.upper()) if self.pool else y
 
 
 class ConvolutionalTransposeLayer:

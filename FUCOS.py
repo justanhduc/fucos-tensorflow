@@ -18,7 +18,7 @@ def run_FUCOS(training_data, validation_data, batchsize, TRAIN=True, restore_fro
 
     #build the model
     model = []
-    with tf.device('/gpu:0'):
+    with tf.device('/gpu:3'):
         x = tf.placeholder(tf.float32, (None, 135, 240, 3), 'input')
         y_ = tf.placeholder(tf.float32, (None, 135, 240, 1), 'gt')
         keep_prob = tf.placeholder(tf.float32, name='dropout_prob')
@@ -110,10 +110,10 @@ def run_FUCOS(training_data, validation_data, batchsize, TRAIN=True, restore_fro
         y_pre_activation = tf.image.resize_images(conv19.output(), (135, 240)) #resize to match the ground truth's shape
         y_pred = function['sigmoid'](y_pre_activation) #activate the output by sigmoid
 
-        cost = metrics.WeightedMultinoulliCrossEntropy(y_pre_activation, y_, 2.5) #use binary cross entropy
+        cost = metrics.MultinoulliCrossEntropy(y_pre_activation, y_) #use binary cross entropy
         var_list = tf.get_collection(tf.GraphKeys().TRAINABLE_VARIABLES)
         L2 = sum([tf.reduce_mean(tf.square(theta)) #L2 regularization
-              for theta in (weight for weight in var_list if 'weights' in weight.name or 'biases' in weight.name)])
+              for theta in (weight for weight in var_list if 'weights' in weight.name)])
         cost += 1e-4 * L2
 
         opt = tf.train.AdamOptimizer(1e-3, 0.9, 0.99, 1e-8).minimize(cost, var_list=var_list) #ADAM optimization
@@ -121,7 +121,7 @@ def run_FUCOS(training_data, validation_data, batchsize, TRAIN=True, restore_fro
         saver = tf.train.Saver()
 
         if TRAIN:
-            run = 'run3'
+            run = 'run4'
             if restore_from_ckpt:
                 try:
                     saver.restore(sess, tf.train.latest_checkpoint('checkpoints/%s' % run))
@@ -191,7 +191,7 @@ def run_FUCOS(training_data, validation_data, batchsize, TRAIN=True, restore_fro
             print('Training ends after %.2f hours' % ((time.time() - start_training_time) / 3600.))
             print('\tbest validation accuracy: %.2f' % best_valid_accuracy)
         else: #testing
-            run = 'run1'
+            run = 'run2'
             saver.restore(sess, tf.train.latest_checkpoint('checkpoints/%s' % run))
             print('Checkpoint restored...')
             print('Testing...')
@@ -238,4 +238,4 @@ if __name__ == '__main__':
     training_data = load_data('training.pkl')
     validation_data = load_data('validation.pkl')
     testing_data = load_data('testing.pkl')
-    run_FUCOS(training_data, testing_data, 1, False, False)
+    run_FUCOS(training_data, testing_data, 25, True, False)
