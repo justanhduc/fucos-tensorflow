@@ -238,4 +238,4 @@ if __name__ == '__main__':
     training_data = load_data('training.pkl')
     validation_data = load_data('validation.pkl')
     testing_data = load_data('testing.pkl')
-    run_FUCOS(training_data, testing_data, 25, True, False)
+    run_FUCOS(training_data, validation_data, 25, True, False)
