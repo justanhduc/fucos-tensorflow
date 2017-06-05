@@ -5,20 +5,30 @@ import time
 import matplotlib.pyplot as plt
 from random import shuffle
 from scipy.ndimage.filters import gaussian_filter
+from scipy import misc
+import os
+import tqdm
+import sys
 
 import layers
 import metrics
 from utils import function, load_weights
 
 
-def run_FUCOS(training_data, validation_data, batchsize, TRAIN=True, restore_from_ckpt=False):
+def run_FUCOS(**kwargs):
+    training_data = kwargs.get('training_data')
+    validation_data = kwargs.get('validation_data')
+    batchsize = kwargs.get('batchsize')
+    TRAIN = kwargs.get('TRAIN', True)
+    run = kwargs.get('run')
+
     config_sess = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
     config_sess.gpu_options.allow_growth = True
     sess = tf.InteractiveSession(config=config_sess)
 
     #build the model
     model = []
-    with tf.device('/gpu:3'):
+    with tf.device('/gpu:2'):
         x = tf.placeholder(tf.float32, (None, 135, 240, 3), 'input')
         y_ = tf.placeholder(tf.float32, (None, 135, 240, 1), 'gt')
         keep_prob = tf.placeholder(tf.float32, name='dropout_prob')
@@ -121,35 +131,28 @@ def run_FUCOS(training_data, validation_data, batchsize, TRAIN=True, restore_fro
         saver = tf.train.Saver()
 
         if TRAIN:
-            run = 'run4'
-            if restore_from_ckpt:
-                try:
-                    saver.restore(sess, tf.train.latest_checkpoint('checkpoints/%s' % run))
-                    print('Checkpoint restored...')
-                except FileExistsError:
-                    print('Cannot restore the requested checkpoint. Initialize the network instead')
-                    tf.Operation.run(tf.global_variables_initializer())
-                    load_weights('pretrained/vgg16_weights.npz', model, sess)
-            else:
-                tf.Operation.run(tf.global_variables_initializer())
-                load_weights('pretrained/vgg16_weights.npz', model, sess) #load pretrained VGG16 weights
+            tf.Operation.run(tf.global_variables_initializer())
+            print('Loading VGG16 weights...')
+            load_weights('pretrained/vgg16_weights.npz', model, sess) #load pretrained VGG16 weights
 
             best_valid_accuracy = 0.
             best_valid_loss = np.inf
-            i = 0
+            best_epoch = 0
+            epoch = 0
             vote_to_terminate = 0
             done_looping = False
             print('TRAINING...')
             start_training_time = time.time()
-            while i < 200 and not done_looping:
+            while epoch < 200 and not done_looping:
+                epoch += 1
                 num_iter_training = int(training_data[0].shape[0] / batchsize)
                 losses_train = 0.
                 accuracies_train = 0.
                 start_batch_time = time.time()
-                print('Epoch %d...' % (i + 1))
+                print('Epoch %d...' % epoch)
                 batch = next_batch(training_data, batchsize) #training
                 for b in batch:
-                    fd = {x: b[0], y_: b[1], keep_prob: 0.5}
+                    fd = {x: b[0], y_: b[1], keep_prob: 0.1}
                     _, a, l = sess.run([opt, accuracy, cost], feed_dict=fd)
                     assert not np.isnan(l), 'Train failed with loss being NaN'
                     losses_train += l
@@ -157,7 +160,7 @@ def run_FUCOS(training_data, validation_data, batchsize, TRAIN=True, restore_fro
 
                 print('\ttraining loss: %s' % (losses_train / num_iter_training))
                 print('\ttraining accuracy: %s' % (accuracies_train / num_iter_training))
-                print('\tepoch %d took %.2f hours' % (i + 1, (time.time() - start_batch_time) / 3600.))
+                print('\tepoch %d took %.2f hours' % (epoch, (time.time() - start_batch_time) / 3600.))
 
                 num_iter_valid = int(validation_data[0].shape[0] / batchsize)
                 losses_valid = 0.
@@ -178,40 +181,72 @@ def run_FUCOS(training_data, validation_data, batchsize, TRAIN=True, restore_fro
 
                 if losses_valid < best_valid_loss:
                     best_valid_loss = losses_valid
+                    best_epoch = epoch
                     vote_to_terminate = 0
                     print('\tbest validation loss achieved: %.4f' % best_valid_loss)
-                    save_path = saver.save(sess, 'checkpoints/%s/model.ckpt' % run)
+                    save_path = saver.save(sess, run)
                     print("\tmodel saved in file: %s" % save_path)
                 else:
                     vote_to_terminate += 1
 
                 if vote_to_terminate > 30:
                     done_looping = True
-                i += 1
             print('Training ends after %.2f hours' % ((time.time() - start_training_time) / 3600.))
             print('\tbest validation accuracy: %.2f' % best_valid_accuracy)
+            print('Training the model using all data available...')
+            total_training_data = (np.concatenate((training_data[0], validation_data[0])),
+                                   np.concatenate((training_data[1], validation_data[1])))
+            for i in range(best_epoch):
+                num_iter_training = int(total_training_data[0].shape[0] / batchsize)
+                losses_train = 0.
+                start_batch_time = time.time()
+                print('Epoch %d...' % (i+1))
+                batch = next_batch(total_training_data, batchsize) #training
+                for b in batch:
+                    fd = {x: b[0], y_: b[1], keep_prob: 0.1}
+                    _, _, l = sess.run([opt, accuracy, cost], feed_dict=fd)
+                    assert not np.isnan(l), 'Train failed with loss being NaN'
+                    losses_train += l
+
+                print('\ttraining loss: %s' % (losses_train / num_iter_training))
+                print('\tepoch %d took %.2f hours' % (i+1, (time.time() - start_batch_time) / 3600.))
+
         else: #testing
-            run = 'run2'
-            saver.restore(sess, tf.train.latest_checkpoint('checkpoints/%s' % run))
+            path = kwargs.get('testing_path')
+            isfolder = kwargs.get('isfolder')
+
+            image_list = [path + '/' + f for f in os.listdir(path) if f.endswith('.jpg')] if isfolder else [path]
+            saver.restore(sess, tf.train.latest_checkpoint(run))
             print('Checkpoint restored...')
-            print('Testing...')
-            start_valid_time = time.time()
-            batch = next_batch(validation_data, batchsize, False)
-            for b in batch:
-                fd = {x: b, keep_prob: 1}
+            print('Testing %d images...' % len(image_list))
+            images = []
+            predictions = []
+            time.sleep(0.1)
+            for i in tqdm.tqdm(range(len(image_list)), unit='images'):
+                img = misc.imread(image_list[i])
+                if len(img.shape) < 3:
+                    continue
+                img = np.reshape(misc.imresize(img, (135, 240)), (1, 135, 240, 3)) / 255.
+                fd = {x: img, keep_prob: 1}
                 pred = sess.run(y_pred, feed_dict=fd)
-                for i in range(pred.shape[0]):
-                    plt.figure(1)
-                    image = np.reshape(b[i, :, :, :], (135, 240, 3))
-                    sal = np.reshape(pred[i, :, :, :], (135, 240))
-                    sal = gaussian_filter(sal, sigma=10)
-                    sal = (sal - np.min(sal)) / (np.max(sal) - np.min(sal))
-                    plt.subplot(211)
-                    plt.imshow(image)
-                    plt.subplot(212)
-                    plt.imshow(sal, cmap='gray')
-                    plt.show()
-            print('\ttesting took %.2f hours' % ((time.time() - start_valid_time) / 3600.))
+                images.append(img)
+                predictions.append(pred)
+            time.sleep(0.1)
+            print('Testing finished!')
+
+            for i in range(len(images)):
+                plt.figure(1)
+                image = np.reshape(images[i], (135, 240, 3))
+                sal = np.reshape(predictions[i], (135, 240))
+                sal = sal * (sal > np.percentile(sal, 95))
+                sal = gaussian_filter(sal, sigma=10)
+                sal = (sal - np.min(sal)) / (np.max(sal) - np.min(sal))
+                plt.subplot(211)
+                plt.imshow(image)
+                plt.subplot(212)
+                plt.imshow(sal, cmap='gray')
+                plt.show()
+
 
 
 def load_data(data_file):
@@ -235,7 +270,30 @@ def next_batch(data, batchsize, ground_truth=True):
 
 
 if __name__ == '__main__':
-    training_data = load_data('training.pkl')
-    validation_data = load_data('validation.pkl')
-    testing_data = load_data('testing.pkl')
-    run_FUCOS(training_data, validation_data, 25, True, False)
+    if len(sys.argv) < 2:
+        raise NotImplementedError
+    else:
+        training_data = load_data('training.pkl')
+        validation_data = load_data('validation.pkl')
+
+        phase = sys.argv[1]
+        checkpoint_fol = sys.argv[2]
+        if phase.lower() == 'train':
+            kwargs = {'training_data': training_data, 'validation_data': validation_data, 'batchsize': 10,
+                      'run': checkpoint_fol, 'TRAIN': True}
+            run_FUCOS(**kwargs)
+        elif phase.lower() == 'test':
+            if len(sys.argv) < 3:
+                raise SyntaxError
+            elif len(sys.argv) == 4:
+                is_folder = True
+            elif len(sys.argv) == 5:
+                is_folder = sys.argv[4]
+            else:
+                raise SyntaxError
+            testing_path = sys.argv[3]
+            kwargs = {'training_data': training_data, 'validation_data': validation_data, 'batchsize': 10,
+                      'run': checkpoint_fol, 'TRAIN': False, 'testing_path': testing_path, 'isfolder': is_folder}
+            run_FUCOS(**kwargs)
+        else:
+            raise NotImplementedError
