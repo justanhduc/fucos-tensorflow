@@ -13,11 +13,15 @@ The datasets for training, validation and testing can be found [here](https://on
 ## Usages
 To train our network from scratch
 ```
-python fucos.py train path/to/save/folder
+python fucos.py train path/to/checkpoint/folder
 ```
-To test an existing model
+To test an existing model on a folder of images
 ```
-python fucos.py test path/to/checkpoint path/to/testing/image/folder
+python fucos.py test path/to/checkpoint/file path/to/testing/image/folder
+```
+or only 1 image
+```
+python fucos.py test path/to/checkpoint/file path/to/testing/image 0
 ```
 ## Acknowlegements 
 This implementation doesn't follow exactly what's on the paper. For more information please check out the [original paper](https://www.google.co.kr/url?sa=t&rct=j&q=&esrc=s&source=web&cd=1&cad=rja&uact=8&ved=0ahUKEwiSkbmwnYvUAhVMHJQKHcYtBNkQFggmMAA&url=http%3A%2F%2Fwww.cv-foundation.org%2Fopenaccess%2Fcontent_cvpr_2016%2Fpapers%2FBruce_A_Deeper_Look_CVPR_2016_paper.pdf&usg=AFQjCNEe8O6bslD8hTTiGPfedAl0MmsoFA&sig2=mCwVrLi_c6dxRiBqAPOydA).
