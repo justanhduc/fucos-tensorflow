@@ -6,7 +6,7 @@ A simple implementation of fucos on tensorflow
 
 [tqdm](https://pypi.python.org/pypi/tqdm)
 
-[VGG16 weights](https://www.cs.toronto.edu/~frossard/post/vgg16/)
+[VGG16 weights](https://www.cs.toronto.edu/~frossard/post/vgg16/), make a folder named "pretrained" and put the file into it.
 
 The datasets for training, validation and testing can be found [here](https://onedrive.live.com/?id=9DDAAD6A86CCD831%218240&cid=9DDAAD6A86CCD831). 
 
