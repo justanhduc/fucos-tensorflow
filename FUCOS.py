@@ -12,7 +12,7 @@ import sys
 
 import layers
 import metrics
-from utils import function, load_weights
+from utils import function, load_weights, padding, depadding
 
 
 def run_FUCOS(**kwargs):
@@ -223,30 +223,31 @@ def run_FUCOS(**kwargs):
             predictions = []
             time.sleep(0.1)
             for i in tqdm.tqdm(range(len(image_list)), unit='images'):
-                img = misc.imread(image_list[i])
-                if len(img.shape) < 3:
+                ori_img = misc.imread(image_list[i])
+                if len(ori_img.shape) < 3:
                     continue
-                img = np.reshape(misc.imresize(img, (135, 240)), (1, 135, 240, 3)) / 255.
+                img = padding(ori_img, 135, 240)
+                img = np.reshape(img, (1, 135, 240, 3)) / 255.
                 fd = {x: img, keep_prob: 1}
                 pred = sess.run(y_pred, feed_dict=fd)
-                images.append(img)
+                images.append(ori_img)
                 predictions.append(pred)
             time.sleep(0.1)
             print('Testing finished!')
 
             for i in range(len(images)):
                 plt.figure(1)
-                image = np.reshape(images[i], (135, 240, 3))
+                image = images[i]
                 sal = np.reshape(predictions[i], (135, 240))
+                sal = depadding(sal, image.shape[0], image.shape[1])
                 sal = sal * (sal > np.percentile(sal, 95))
-                sal = gaussian_filter(sal, sigma=10)
+                sal = gaussian_filter(sal, sigma=0.09*sal.shape[0])
                 sal = (sal - np.min(sal)) / (np.max(sal) - np.min(sal))
                 plt.subplot(211)
                 plt.imshow(image)
                 plt.subplot(212)
                 plt.imshow(sal, cmap='gray')
                 plt.show()
-
 
 
 def load_data(data_file):
@@ -288,7 +289,7 @@ if __name__ == '__main__':
             elif len(sys.argv) == 4:
                 is_folder = True
             elif len(sys.argv) == 5:
-                is_folder = sys.argv[4]
+                is_folder = True if sys.argv[4] == '1' else False
             else:
                 raise SyntaxError
             testing_path = sys.argv[3]

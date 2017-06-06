@@ -72,7 +72,7 @@ class ConvolutionalLayer:
             if self.pool:
                 with tf.name_scope('pooling'):
                     output_conv = self.pool2d(output_conv, (1, self.pool_size[0], self.pool_size[1], 1),
-                                      (1, self.pool_size[0], self.pool_size[1], 1), self.pool_type.upper())
+                                              (1, self.pool_size[0], self.pool_size[1], 1), self.pool_type.upper())
 
             if self.drop_out:
                 with tf.name_scope('dropout'):
@@ -138,8 +138,7 @@ class ConvolutionalLayer:
                                      tf.ceil(tf.to_float(self.input_shape[2] - self.filter_shape[1] + 1) /
                                              self.conv_stride[2])),
                                  self.filter_shape[3])
-        return (out_shape[0], out_shape[1] * out_shape[2] * out_shape[3]) if flatten \
-            else out_shape
+        return (out_shape[0], out_shape[1] * out_shape[2] * out_shape[3]) if flatten else out_shape
 
     def get_output_shape(self, flatten=None):
         if flatten is None:

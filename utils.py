@@ -2,7 +2,25 @@ import tensorflow as tf
 import numpy as np
 import json
 import pickle
+import threading
 from tensorflow.python.client import device_lib
+from scipy import misc
+
+thread_lock = threading.Lock()
+
+
+class Thread(threading.Thread):
+    def __init__(self, id, name, func):
+        threading.Thread.__init__(self)
+        self.id = id
+        self.name = name
+        self.func = func
+
+    def run(self):
+        print('Starting ' + self.name)
+        # thread_lock.acquire()
+        self.outputs = self.func()
+        # thread_lock.release()
 
 
 def lrelu(x, alpha=0.1):
@@ -159,6 +177,53 @@ def fully_connected_to_convolution(weight, prev_layer_shape):
         return None
 
 
+def padding(img, shape_r=1080, shape_c=1920, channels=3):
+    img_padded = np.zeros((shape_r, shape_c, channels), dtype=np.uint8)
+    if channels == 1:
+        img_padded = np.zeros((shape_r, shape_c), dtype=np.uint8)
+
+    original_shape = img.shape
+    rows_rate = original_shape[0]/shape_r
+    cols_rate = original_shape[1]/shape_c
+
+    if rows_rate > cols_rate:
+        new_cols = (original_shape[1] * shape_r) // original_shape[0]
+        img = misc.imresize(img, (shape_r, new_cols))
+        if new_cols > shape_c:
+            new_cols = shape_c
+        img_padded[:, ((img_padded.shape[1] - new_cols) // 2):((img_padded.shape[1] - new_cols) // 2 + new_cols)] = img
+    else:
+        new_rows = (original_shape[0] * shape_c) // original_shape[1]
+        img = misc.imresize(img, (new_rows, shape_c))
+        if new_rows > shape_r:
+            new_rows = shape_r
+        img_padded[((img_padded.shape[0] - new_rows) // 2):((img_padded.shape[0] - new_rows) // 2 + new_rows), :] = img
+    return img_padded
+
+
+def depadding(img, shape_r, shape_c):
+    original_shape = img.shape
+    rows_rate = original_shape[0]/shape_r
+    cols_rate = original_shape[1]/shape_c
+    if rows_rate < cols_rate:
+        new_cols = (original_shape[1] * shape_r) // original_shape[0]
+        img = misc.imresize(img, (shape_r, new_cols))
+        if new_cols > shape_c:
+            new_cols = shape_c
+        img_depadded = img[:, ((img.shape[1] - new_cols) // 2):((img.shape[1] - new_cols) // 2 + new_cols)]
+    else:
+        new_rows = (original_shape[0] * shape_c) // original_shape[1]
+        img = misc.imresize(img, (new_rows, shape_c))
+        if new_rows > shape_r:
+            new_rows = shape_r
+        img_depadded = img[((img.shape[0] - new_rows) // 2):((img.shape[0] - new_rows) // 2 + new_rows), :]
+    return img_depadded
+
+
 if __name__ == '__main__':
-    load_weights('pretrained/bvlc_alexnet.npy', None, None)
-    pass
+    from matplotlib import pyplot as plt
+    img = misc.imread('c:/users/just.anhduc/desktop/kangaroo.jpg')
+    padded_img = padding(img)
+    depadded_img = depadding(padded_img, img.shape[0], img.shape[1])
+    plt.imshow(depadded_img)
+    plt.show()
